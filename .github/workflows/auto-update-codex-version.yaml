@@ -23,65 +23,12 @@ jobs:
           node-version: 24
           cache: npm
 
-      - name: Update Codex dependency
-        id: update
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          latest_version="$(npm view @openai/codex version)"
-          protocol_version="$(node -p "require('./packages/codex-protocol/package.json').dependencies['@openai/codex']")"
-          novus_version="$(node -p "require('./apps/novus/package.json').dependencies['@openai/codex']")"
-
-          echo "latest_version=$latest_version" >> "$GITHUB_OUTPUT"
-
-          if [[ "$protocol_version" == "$latest_version" && "$novus_version" == "$latest_version" ]]; then
-            echo "updated=false" >> "$GITHUB_OUTPUT"
-            echo "@openai/codex is already at $latest_version."
-            exit 0
-          fi
-
-          npm install --save-exact \
-            --workspace @lightcode/codex-protocol \
-            --workspace @novus/app \
-            "@openai/codex@$latest_version"
-
-          echo "updated=true" >> "$GITHUB_OUTPUT"
-
       - name: Regenerate and verify Codex protocol
-        if: steps.update.outputs.updated == 'true'
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: "gpt-5.6-sol"
+          effort: "medium"
           permission-profile: ":workspace"
           prompt-file: ".github/codex/update-codex-version.md"
 
-      - name: Create pull request
-        if: steps.update.outputs.updated == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BASE_BRANCH: ${{ github.event.repository.default_branch }}
-          LATEST_VERSION: ${{ steps.update.outputs.latest_version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ -z "$(git status --porcelain)" ]]; then
-            echo "No repository changes were produced."
-            exit 0
-          fi
-
-          branch="codex/update-codex-${LATEST_VERSION}-${GITHUB_RUN_ID}"
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -c "$branch"
-          git add --all
-          git commit -m "Update Codex to $LATEST_VERSION"
-          git push --set-upstream origin "$branch"
-
-          gh pr create \
-            --base "$BASE_BRANCH" \
-            --head "$branch" \
-            --title "Update Codex to $LATEST_VERSION" \
-            --body "Automated Codex dependency and generated protocol update."
